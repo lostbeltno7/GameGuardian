@@ -1,0 +1,471 @@
+
+/**
+ * GAME GUARDIAN SHIELD - EMBED SCRIPT FOR APK GAMES
+ * 
+ * This is a simplified example of how the protection system would be integrated
+ * into an actual Android game APK to prevent memory manipulation with tools like
+ * Game Guardian or Cheat Engine.
+ * 
+ * IMPLEMENTATION NOTES:
+ * 1. In a real implementation, this should be written in C/C++ using JNI (Java Native Interface)
+ * 2. The library should be heavily obfuscated to prevent reverse engineering
+ * 3. Critical values should be encrypted and checksummed
+ * 4. Multiple detection mechanisms should be used in parallel
+ */
+
+// ---------- NATIVE CODE (C/C++) SECTION ---------- //
+// This would be compiled to a .so native library
+
+#include <jni.h>
+#include <string>
+#include <vector>
+#include <unistd.h>
+#include <sys/ptrace.h>
+#include <dirent.h>
+#include <android/log.h>
+
+#define TAG "MemGuard"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+// Known signatures of cheating tools
+const std::vector<std::string> CHEAT_PACKAGES = {
+    "com.gameguardian.app",
+    "org.cheatengine.cegui",
+    "com.zune.gamekiller",
+    "catch_.me_.if_.you_.can_"
+};
+
+// Check if a package is installed
+bool isPackageInstalled(JNIEnv *env, jobject context, const char* packageName) {
+    // Get the PackageManager
+    jclass contextClass = env->GetObjectClass(context);
+    jmethodID getPackageManagerId = env->GetMethodID(contextClass, "getPackageManager", 
+                                               "()Landroid/content/pm/PackageManager;");
+    jobject packageManager = env->CallObjectMethod(context, getPackageManagerId);
+    
+    // Check if package is installed
+    jclass packageManagerClass = env->GetObjectClass(packageManager);
+    jmethodID getPackageInfoId = env->GetMethodID(packageManagerClass, "getPackageInfo", 
+                                           "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
+    
+    jstring packageNameStr = env->NewStringUTF(packageName);
+    
+    try {
+        env->CallObjectMethod(packageManager, getPackageInfoId, packageNameStr, 0);
+        env->DeleteLocalRef(packageNameStr);
+        return true; // Package exists
+    } catch (...) {
+        env->DeleteLocalRef(packageNameStr);
+        return false; // Package doesn't exist
+    }
+}
+
+// Detect debugger
+bool isBeingDebugged() {
+    // Check tracers
+    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) {
+        return true; // Process is being traced
+    }
+    
+    // Check for debugging flags in /proc/self/status
+    FILE *status = fopen("/proc/self/status", "r");
+    if (status) {
+        char line[256];
+        while (fgets(line, sizeof(line), status)) {
+            if (strncmp(line, "TracerPid:", 10) == 0) {
+                int pid;
+                if (sscanf(line + 10, "%d", &pid) == 1 && pid != 0) {
+                    fclose(status);
+                    return true; // Being traced
+                }
+                break;
+            }
+        }
+        fclose(status);
+    }
+    
+    return false;
+}
+
+// Check for emulator
+bool isEmulator() {
+    // Common emulator properties
+    char prop[PROP_VALUE_MAX];
+    
+    __system_property_get("ro.product.model", prop);
+    if (strcmp(prop, "sdk") == 0 || strcmp(prop, "google_sdk") == 0)
+        return true;
+    
+    __system_property_get("ro.product.manufacturer", prop);
+    if (strcmp(prop, "Genymotion") == 0 || strcmp(prop, "unknown") == 0)
+        return true;
+        
+    // Many other checks would be implemented here
+    
+    return false;
+}
+
+// Memory integrity functions
+uint32_t calculateChecksum(void* addr, size_t size) {
+    uint32_t checksum = 0;
+    uint8_t* ptr = (uint8_t*)addr;
+    
+    for (size_t i = 0; i < size; i++) {
+        checksum = ((checksum << 5) + checksum) + ptr[i];
+    }
+    
+    return checksum;
+}
+
+// Store checksums for memory regions
+struct MemRegion {
+    void* address;
+    size_t size;
+    uint32_t checksum;
+};
+std::vector<MemRegion> monitoredRegions;
+
+// Add a memory region to monitor
+void addMemoryRegion(void* addr, size_t size) {
+    MemRegion region;
+    region.address = addr;
+    region.size = size;
+    region.checksum = calculateChecksum(addr, size);
+    monitoredRegions.push_back(region);
+}
+
+// Check if memory has been tampered with
+bool isMemoryTampered() {
+    for (const auto& region : monitoredRegions) {
+        uint32_t current = calculateChecksum(region.address, region.size);
+        if (current != region.checksum) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Apply countermeasures
+void applyCountermeasures() {
+    LOGW("Memory tampering detected - applying countermeasures");
+    
+    // In a real implementation, this might:
+    // 1. Corrupt save data
+    // 2. Gradually make the game unplayable
+    // 3. Report to server
+    // 4. Reset progress
+}
+
+// JNI interface
+extern "C" {
+    JNIEXPORT jboolean JNICALL
+    Java_com_gameguardianshield_MemoryGuard_initProtection(JNIEnv *env, jobject thiz, jobject context) {
+        LOGI("Initializing memory protection");
+        
+        // Check for cheat tools
+        for (const auto& package : CHEAT_PACKAGES) {
+            if (isPackageInstalled(env, context, package.c_str())) {
+                LOGW("Cheat tool detected: %s", package.c_str());
+                return JNI_FALSE;
+            }
+        }
+        
+        // Check for debugger
+        if (isBeingDebugged()) {
+            LOGW("Debugger detected");
+            return JNI_FALSE;
+        }
+        
+        // Check for emulator
+        if (isEmulator()) {
+            LOGW("Emulator detected");
+            return JNI_FALSE;
+        }
+        
+        return JNI_TRUE;
+    }
+    
+    JNIEXPORT void JNICALL
+    Java_com_gameguardianshield_MemoryGuard_monitorMemory(JNIEnv *env, jobject thiz, 
+                                                         jlong address, jint size) {
+        addMemoryRegion((void*)address, (size_t)size);
+    }
+    
+    JNIEXPORT jboolean JNICALL
+    Java_com_gameguardianshield_MemoryGuard_checkMemoryIntegrity(JNIEnv *env, jobject thiz) {
+        if (isMemoryTampered()) {
+            applyCountermeasures();
+            return JNI_FALSE;
+        }
+        return JNI_TRUE;
+    }
+    
+    // Protected values interface
+    JNIEXPORT jlong JNICALL
+    Java_com_gameguardianshield_MemoryGuard_protectValue(JNIEnv *env, jobject thiz, 
+                                                       jint initialValue) {
+        // Create a protected value in native memory
+        int* protectedPtr = new int;
+        *protectedPtr = initialValue;
+        
+        // Monitor this memory
+        addMemoryRegion(protectedPtr, sizeof(int));
+        
+        return (jlong)protectedPtr;
+    }
+    
+    JNIEXPORT jint JNICALL
+    Java_com_gameguardianshield_MemoryGuard_getValue(JNIEnv *env, jobject thiz, jlong ptr) {
+        int* valuePtr = (int*)ptr;
+        return *valuePtr;
+    }
+    
+    JNIEXPORT void JNICALL
+    Java_com_gameguardianshield_MemoryGuard_setValue(JNIEnv *env, jobject thiz, 
+                                                   jlong ptr, jint newValue) {
+        int* valuePtr = (int*)ptr;
+        *valuePtr = newValue;
+        
+        // Update the checksum after changing the value
+        for (auto& region : monitoredRegions) {
+            if (region.address == valuePtr) {
+                region.checksum = calculateChecksum(valuePtr, sizeof(int));
+                break;
+            }
+        }
+    }
+}
+
+// ---------- JAVA INTERFACE SECTION ---------- //
+// This would be part of the game's Java/Kotlin code
+
+package com.gameguardianshield;
+
+import android.content.Context;
+import android.os.Handler;
+
+public class MemoryGuard {
+    static {
+        System.loadLibrary("memguard"); // Load native library
+    }
+    
+    private Context context;
+    private Handler handler;
+    private Runnable integrityChecker;
+    private boolean isProtectionActive = false;
+    private CheatListener cheatListener;
+    
+    public interface CheatListener {
+        void onCheatDetected();
+    }
+    
+    public MemoryGuard(Context context) {
+        this.context = context;
+        this.handler = new Handler();
+        this.integrityChecker = new Runnable() {
+            @Override
+            public void run() {
+                if (isProtectionActive) {
+                    if (!checkMemoryIntegrity()) {
+                        if (cheatListener != null) {
+                            cheatListener.onCheatDetected();
+                        }
+                    }
+                    handler.postDelayed(this, 2000); // Check every 2 seconds
+                }
+            }
+        };
+    }
+    
+    public void setCheatListener(CheatListener listener) {
+        this.cheatListener = listener;
+    }
+    
+    public boolean startProtection() {
+        if (initProtection(context)) {
+            isProtectionActive = true;
+            handler.post(integrityChecker);
+            return true;
+        }
+        return false;
+    }
+    
+    public void stopProtection() {
+        isProtectionActive = false;
+        handler.removeCallbacks(integrityChecker);
+    }
+    
+    // Protected value wrapper
+    public static class ProtectedValue {
+        private final long nativePtr;
+        private final MemoryGuard guard;
+        
+        private ProtectedValue(MemoryGuard guard, long ptr) {
+            this.guard = guard;
+            this.nativePtr = ptr;
+        }
+        
+        public int get() {
+            return guard.getValue(nativePtr);
+        }
+        
+        public void set(int value) {
+            guard.setValue(nativePtr, value);
+        }
+    }
+    
+    public ProtectedValue createProtectedValue(int initialValue) {
+        long ptr = protectValue(initialValue);
+        return new ProtectedValue(this, ptr);
+    }
+    
+    // Monitor a specific memory region
+    public void monitorMemoryRegion(long address, int size) {
+        monitorMemory(address, size);
+    }
+    
+    // Native methods
+    private native boolean initProtection(Context context);
+    private native void monitorMemory(long address, int size);
+    private native boolean checkMemoryIntegrity();
+    private native long protectValue(int initialValue);
+    private native int getValue(long ptr);
+    private native void setValue(long ptr, int value);
+}
+
+// ---------- IMPLEMENTATION EXAMPLE ---------- //
+// Example of usage in a game class
+
+import com.gameguardianshield.MemoryGuard;
+
+public class GameActivity extends Activity {
+    private MemoryGuard memoryGuard;
+    private MemoryGuard.ProtectedValue playerGold;
+    private MemoryGuard.ProtectedValue playerHealth;
+    
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_game);
+        
+        // Initialize memory protection
+        memoryGuard = new MemoryGuard(this);
+        memoryGuard.setCheatListener(new MemoryGuard.CheatListener() {
+            @Override
+            public void onCheatDetected() {
+                // Show warning, reset values, or apply penalties
+                Toast.makeText(GameActivity.this, "Cheating detected!", Toast.LENGTH_SHORT).show();
+                playerGold.set(0); // Penalty for cheating
+                saveGame(); // Save the penalized state
+            }
+        });
+        
+        // Start protection
+        boolean protectionStarted = memoryGuard.startProtection();
+        if (!protectionStarted) {
+            // Cheating tools detected during initialization
+            Toast.makeText(this, "This game doesn't work on modified devices", 
+                           Toast.LENGTH_LONG).show();
+            finish(); // Close the game
+            return;
+        }
+        
+        // Create protected values
+        playerGold = memoryGuard.createProtectedValue(100);
+        playerHealth = memoryGuard.createProtectedValue(100);
+        
+        // Load saved values (if any)
+        loadGame();
+        
+        // Example: Add gold when button is clicked
+        Button addGoldButton = findViewById(R.id.add_gold_button);
+        addGoldButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // Always use the getter/setter methods
+                int currentGold = playerGold.get();
+                playerGold.set(currentGold + 10);
+                updateUI();
+            }
+        });
+        
+        // Update UI with initial values
+        updateUI();
+    }
+    
+    private void updateUI() {
+        TextView goldText = findViewById(R.id.gold_text);
+        TextView healthText = findViewById(R.id.health_text);
+        
+        goldText.setText("Gold: " + playerGold.get());
+        healthText.setText("Health: " + playerHealth.get());
+    }
+    
+    private void saveGame() {
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        
+        // Save the protected values
+        editor.putInt("player_gold", playerGold.get());
+        editor.putInt("player_health", playerHealth.get());
+        
+        // In a real game, these values would be encrypted
+        editor.apply();
+    }
+    
+    private void loadGame() {
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        
+        // Load the protected values
+        int savedGold = prefs.getInt("player_gold", 100);
+        int savedHealth = prefs.getInt("player_health", 100);
+        
+        // Set the values in our protected containers
+        playerGold.set(savedGold);
+        playerHealth.set(savedHealth);
+    }
+    
+    @Override
+    protected void onPause() {
+        super.onPause();
+        saveGame();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        memoryGuard.stopProtection();
+        super.onDestroy();
+    }
+}
+
+// ---------- BUILD INSTRUCTIONS ---------- //
+
+// 1. Create the C++ file (memguard.cpp) with the native code
+// 2. Set up CMake in your project's build.gradle:
+//    externalNativeBuild {
+//        cmake {
+//            path "src/main/cpp/CMakeLists.txt"
+//        }
+//    }
+//
+// 3. Create CMakeLists.txt:
+//    cmake_minimum_required(VERSION 3.4.1)
+//    add_library(memguard SHARED memguard.cpp)
+//    target_link_libraries(memguard log)
+//
+// 4. Add required permissions to AndroidManifest.xml:
+//    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+//    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+//    <uses-permission android:name="android.permission.INTERNET" />
+
+// ---------- SECURITY NOTES ---------- //
+
+// This is a simplified example, a production implementation would:
+// 1. Use much stronger obfuscation
+// 2. Implement proper encryption for saved values
+// 3. Include server-side validation when possible
+// 4. Apply multiple detection layers
+// 5. Use more sophisticated countermeasures
+// 6. Protect the protection system itself from being disabled
