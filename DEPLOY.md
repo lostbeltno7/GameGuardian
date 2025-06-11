@@ -1,5 +1,5 @@
 
-# STFU GameGuardian - Production Deployment Guide
+# GameGuardian - Production Deployment Guide
 
 This document provides comprehensive instructions for deploying the STFU GameGuardian anti-cheat system to a production environment.
 
