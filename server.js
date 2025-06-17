@@ -552,7 +552,7 @@ async function verifyGameValues(player, newValues, clientTimestamp, clientChecks
     const maxHealth = player.gameData.maxHealth || 100;
     
     if (newValues.health > maxHealth && 
-        !newValues.powerups?.includes('health')) {
+        !newValues.powerups || !newValues.powerups.includes('health')) {
       return { isValid: false, reason: "Health exceeds maximum allowed value" };
     }
     
